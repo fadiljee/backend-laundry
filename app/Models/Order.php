@@ -22,6 +22,18 @@ class Order extends Model
         'image_path',
     ];
 
+    // 1. Beri tahu Laravel untuk menyertakan atribut 'image_url' saat diubah ke JSON
+    protected $appends = ['image_url'];
+
+    // 2. Buat fungsi pembuat URL otomatis
+    public function getImageUrlAttribute()
+    {
+        if ($this->image_path) {
+            return asset('storage/' . $this->image_path);
+        }
+        return null;
+    }
+
     // Relasi ke history (One to Many)
     public function logs()
     {

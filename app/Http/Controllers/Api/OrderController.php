@@ -31,44 +31,52 @@ public function index()
     }
 }
     // 1. Simpan Pesanan Baru (Admin)
+    // 1. Simpan Pesanan Baru (Admin)
     public function store(Request $request)
-{
-    try {
-        $request->validate([
-            'customer_name' => 'required',
-            'wa_number' => 'required',
-            'address' => 'required',
-            'weight' => 'required',
-            'service' => 'required',
-        ]);
+    {
+        try {
+            $request->validate([
+                'customer_name' => 'required',
+                'wa_number' => 'required',
+                'address' => 'required',
+                'weight' => 'required',
+                'service' => 'required',
+                // Tambahkan validasi gambar (opsional tapi disarankan)
+                'image' => 'nullable|image|mimes:jpeg,png,jpg|max:5120', // max 5MB
+            ]);
 
-        $orderCode = 'LDR-' . strtoupper(Str::random(6));
+            $orderCode = 'LDR-' . strtoupper(Str::random(6));
 
-        $order = Order::create([
-            'order_code'    => $orderCode,
-            'customer_name' => $request->customer_name,
-            'wa_number'     => $request->wa_number,
-            'address'       => $request->address,
-            'weight'        => $request->weight,
-            'service'       => $request->service,
-            'status'        => 'Menunggu Pembayaran',
-        ]);
+            // Logika upload gambar
+            $imagePath = null;
+            if ($request->hasFile('image')) {
+                // Gambar akan disimpan di folder: storage/app/public/orders
+                $imagePath = $request->file('image')->store('orders', 'public');
+            }
 
-        // PERHATIKAN DISINI: Harus pakai panah (->) bukan titik (.)
-        TrackingLog::create([
-            'order_id' => $order->id, // <--- Pastikan ini pakai ->
-            'status'   => 'Pesanan Dibuat',
-            'message'  => 'Pesanan telah diterima oleh Lyra Laundry.',
-        ]);
+            $order = Order::create([
+                'order_code'    => $orderCode,
+                'customer_name' => $request->customer_name,
+                'wa_number'     => $request->wa_number,
+                'address'       => $request->address,
+                'weight'        => $request->weight,
+                'service'       => $request->service,
+                'status'        => 'Menunggu Pembayaran',
+                'image_path'    => $imagePath, // <--- Simpan path gambar ke database
+            ]);
 
-        return response()->json(['message' => 'Order Created', 'data' => $order], 201);
-        
-    } catch (\Exception $e) {
-        // Ini biar kalau error, kita dapet pesan jelas di Postman
-        return response()->json(['error' => $e->getMessage()], 500);
+            TrackingLog::create([
+                'order_id' => $order->id, 
+                'status'   => 'Pesanan Dibuat',
+                'message'  => 'Pesanan telah diterima oleh Lyra Laundry.',
+            ]);
+
+            return response()->json(['message' => 'Order Created', 'data' => $order], 201);
+            
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
-}
-
     // 2. Ambil Detail Tracking (Untuk Tracking Page Flutter)
     public function show($code)
     {
