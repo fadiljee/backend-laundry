@@ -12,7 +12,6 @@ use Illuminate\Support\Facades\DB;
 class OrderController extends Controller
 {
 
-    // Tambahkan ini di dalam class OrderController
 public function index()
 {
     try {
@@ -30,8 +29,50 @@ public function index()
         ], 500);
     }
 }
-    // 1. Simpan Pesanan Baru (Admin)
-    // 1. Simpan Pesanan Baru (Admin)
+
+// --- FUNGSI UPLOAD GAMBAR SUSULAN ---
+    public function updateImage(Request $request, $id)
+    {
+        // 1. Catat ke log Laravel apa yang sebenarnya dikirim oleh Flutter
+        \Log::info("=== ADA REQUEST UPLOAD GAMBAR MASUK ===");
+        \Log::info("Order ID: " . $id);
+        \Log::info("Apakah ada file 'image'? " . ($request->hasFile('image') ? 'ADA' : 'TIDAK ADA'));
+
+        try {
+            // 2. Validasi (Kita longgarkan sedikit batasnya jadi 10MB untuk amannya)
+            $request->validate([
+                'image' => 'required|image|mimes:jpeg,png,jpg|max:10240', 
+            ]);
+
+            $order = Order::findOrFail($id);
+            
+            // 3. Simpan file ke folder storage/app/public/orders
+            $imagePath = $request->file('image')->store('orders', 'public');
+            
+            // 4. Update database
+            $order->update([
+                'image_path' => $imagePath,
+            ]);
+
+            \Log::info("Upload sukses! Disimpan di: " . $imagePath);
+
+            return response()->json([
+                'message' => 'Foto berhasil diupload', 
+                // Generate URL utuh untuk dikirim ke Flutter
+                'image_url' => asset('storage/' . $imagePath) 
+            ], 200);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            // Kalau gagal di validasi (misal file bukan gambar)
+            \Log::error("Validasi gagal: " . json_encode($e->errors()));
+            return response()->json(['error' => $e->errors()], 422);
+            
+        } catch (\Exception $e) {
+            // Kalau gagal sistem (misal folder tidak bisa ditulis)
+            \Log::error("Error sistem upload: " . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
     public function store(Request $request)
     {
         try {
@@ -77,6 +118,40 @@ public function index()
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
+// --- FUNGSI BARU: UPDATE STATUS DARI KURIR ---
+    public function updateStatus(Request $request, $id)
+    {
+        try {
+            // Validasi data yang dikirim dari Flutter
+            $request->validate([
+                'status' => 'required|string',
+            ]);
+
+            // Cari pesanan berdasarkan ID
+            $order = Order::findOrFail($id);
+            
+            // Update statusnya
+            $order->update([
+                'status' => $request->status,
+            ]);
+
+            // Rekam juga ke riwayat (Tracking Log) biar pelanggan bisa lihat di HP-nya
+            TrackingLog::create([
+                'order_id' => $order->id,
+                'status'   => $request->status,
+                'message'  => 'Status cucian diperbarui menjadi: ' . $request->status,
+            ]);
+
+            return response()->json([
+                'message' => 'Status berhasil diupdate', 
+                'data' => $order
+            ], 200);
+            
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
     // 2. Ambil Detail Tracking (Untuk Tracking Page Flutter)
     public function show($code)
     {
