@@ -14,6 +14,7 @@ Route::get('/orders/{code}', [OrderController::class, 'show']); // Pelanggan tra
 //mitrans
 Route::post('/payment/token', [PaymentController::class, 'getSnapToken']);
 Route::post('/payment/callback', [PaymentController::class, 'callback']);
+Route::post('/orders', [OrderController::class, 'store']);
 
 // --- PROTECTED ROUTES (Hanya Admin/Kurir yang punya Token) ---
 Route::middleware('auth:sanctum')->group(function () {
@@ -25,18 +26,21 @@ Route::middleware('auth:sanctum')->group(function () {
     
     // Fitur Laundry Management (Pesanan)
     Route::get('/orders', [OrderController::class, 'index']);
-    Route::post('/orders', [OrderController::class, 'store']);
     Route::post('/orders/{id}/pay', [OrderController::class, 'payment']);
     // PASTIKAN MENGGUNAKAN Route::post
 Route::post('/orders/{id}/image', [\App\Http\Controllers\Api\OrderController::class, 'updateImage']);
     Route::post('/orders/{id}/status', [OrderController::class, 'updateStatus']); // <--- PENTING UNTUK KURIR
     Route::post('/orders/{id}/location', [OrderController::class, 'updateLocation']);
+    Route::post('/orders/{id}/weight', [OrderController::class, 'updateWeight']);
     
     // Rute Manajemen Kurir
-    Route::get('/couriers', [CourierController::class, 'index']);
-    Route::post('/couriers', [CourierController::class, 'store']);
-    Route::put('/couriers/{id}', [CourierController::class, 'update']);
-    Route::delete('/couriers/{id}', [CourierController::class, 'destroy']);
-    
-
+Route::get('/couriers', [AuthController::class, 'getCouriers']);
+    // Route::post('/couriers', [AuthController::class, 'storeCourier']);
+  // HAPUS yang Route::post('/couriers/{id}', ...)
+// CUKUP gunakan yang ini:
+Route::put('/couriers/{id}', [AuthController::class, 'updateCourier']);
+// Dan pastikan ada method POST untuk simpan baru
+Route::post('/couriers', [AuthController::class, 'storeCourier']);
+    // Route::post('/couriers/{id}', [AuthController::class, 'updateCourier']); // Gunakan POST untuk upload file
+    Route::delete('/couriers/{id}', [AuthController::class, 'destroyCourier']);
 });

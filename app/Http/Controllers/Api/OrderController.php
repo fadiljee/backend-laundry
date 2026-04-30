@@ -73,6 +73,24 @@ public function index()
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
+
+public function updateWeight(Request $request, $id)
+    {
+        $request->validate([
+            'weight' => 'required|numeric'
+        ]);
+
+        $order = Order::findOrFail($id);
+        $order->weight = $request->weight;
+        $order->save();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Berat cucian berhasil diupdate',
+            'data' => $order
+        ]);
+    }
+
     public function store(Request $request)
     {
         try {
@@ -199,35 +217,99 @@ public function index()
     {
         $hargaPerKilo = 7000; 
         
-        $completedOrders = Order::where('status', '!=', 'Menunggu Pembayaran');
+        // Ambil semua order yang tidak 'Menunggu Pembayaran'
+        $baseQuery = Order::where('status', '!=', 'Menunggu Pembayaran');
 
-        $dailyWeight = (float) ((clone $completedOrders)->whereDate('created_at', Carbon::today())->sum('weight'));
-        $daily = $dailyWeight * $hargaPerKilo;
+        // ---------------------------------------------------------
+        // 1. DATA HARIAN (Hari Ini)
+        // ---------------------------------------------------------
+        $dailyOrders = (clone $baseQuery)->whereDate('created_at', \Carbon\Carbon::today())->get();
+        $dailyWeight = $dailyOrders->sum('weight');
+        $dailyRevenue = $dailyWeight * $hargaPerKilo;
+        
+        // Breakdown Harian: Tampilkan per transaksi
+        $dailyBreakdown = $dailyOrders->map(function($order) use ($hargaPerKilo) {
+            return [
+                'label' => 'Order #' . $order->id . ' (' . \Carbon\Carbon::parse($order->created_at)->format('H:i') . ')',
+                'revenue' => $order->weight * $hargaPerKilo,
+                'orders' => 1
+            ];
+        });
 
-        $weeklyWeight = (float) ((clone $completedOrders)->whereBetween('created_at', [Carbon::now()->startOfWeek(), Carbon::now()->endOfWeek()])->sum('weight'));
-        $weekly = $weeklyWeight * $hargaPerKilo;
+        // ---------------------------------------------------------
+        // 2. DATA MINGGUAN (Senin - Minggu Ini)
+        // ---------------------------------------------------------
+        $weeklyOrders = (clone $baseQuery)->whereBetween('created_at', [
+            \Carbon\Carbon::now()->startOfWeek(), 
+            \Carbon\Carbon::now()->endOfWeek()
+        ])->get();
+        $weeklyWeight = $weeklyOrders->sum('weight');
+        $weeklyRevenue = $weeklyWeight * $hargaPerKilo;
+        
+        // Breakdown Mingguan: Kelompokkan per Hari (Contoh: "Senin, 29 Apr")
+        $weeklyBreakdown = $weeklyOrders->groupBy(function($order) {
+            return \Carbon\Carbon::parse($order->created_at)->translatedFormat('l, d M');
+        })->map(function($group, $dayName) use ($hargaPerKilo) {
+            return [
+                'label' => $dayName,
+                'revenue' => $group->sum('weight') * $hargaPerKilo,
+                'orders' => $group->count()
+            ];
+        })->values(); // values() agar jadi JSON Array [ ], bukan JSON Object { }
 
-        $monthlyWeight = (float) ((clone $completedOrders)->whereMonth('created_at', Carbon::now()->month)
-                                                        ->whereYear('created_at', Carbon::now()->year)->sum('weight'));
-        $monthly = $monthlyWeight * $hargaPerKilo;
+        // ---------------------------------------------------------
+        // 3. DATA BULANAN (Bulan Ini)
+        // ---------------------------------------------------------
+        $monthlyOrders = (clone $baseQuery)->whereMonth('created_at', \Carbon\Carbon::now()->month)
+                                           ->whereYear('created_at', \Carbon\Carbon::now()->year)->get();
+        $monthlyWeight = $monthlyOrders->sum('weight');
+        $monthlyRevenue = $monthlyWeight * $hargaPerKilo;
+        
+        // Breakdown Bulanan: Kelompokkan per Tanggal (Contoh: "29 Apr 2026")
+        $monthlyBreakdown = $monthlyOrders->groupBy(function($order) {
+            return \Carbon\Carbon::parse($order->created_at)->translatedFormat('d M Y');
+        })->map(function($group, $dateString) use ($hargaPerKilo) {
+            return [
+                'label' => $dateString,
+                'revenue' => $group->sum('weight') * $hargaPerKilo,
+                'orders' => $group->count()
+            ];
+        })->values();
 
-        $yearlyWeight = (float) ((clone $completedOrders)->whereYear('created_at', Carbon::now()->year)->sum('weight'));
+        // ---------------------------------------------------------
+        // 4. DATA TAHUNAN & STATUS PESANAN
+        // ---------------------------------------------------------
+        $yearlyWeight = (float) ((clone $baseQuery)->whereYear('created_at', \Carbon\Carbon::now()->year)->sum('weight'));
         $yearly = $yearlyWeight * $hargaPerKilo;
 
-        // --- TAMBAHAN BARU: Hitung Jumlah Pesanan ---
         $completedCount = Order::where('status', 'Selesai')->count();
         $processCount = Order::where('status', '!=', 'Selesai')
                              ->where('status', '!=', 'Menunggu Pembayaran')
                              ->count();
 
+        // ---------------------------------------------------------
+        // 5. KEMBALIKAN RESPONSE JSON
+        // ---------------------------------------------------------
         return response()->json([
             'data' => [
-                'daily' => $daily,
-                'weekly' => $weekly,
-                'monthly' => $monthly, // Ini yang akan kita pakai di Dashboard
-                'yearly' => $yearly,
-                'completed_count' => $completedCount, // Jumlah selesai
-                'process_count' => $processCount,     // Jumlah proses
+                'daily' => [
+                    'total_revenue' => $dailyRevenue,
+                    'total_orders' => $dailyOrders->count(),
+                    'breakdown' => $dailyBreakdown
+                ],
+                'weekly' => [
+                    'total_revenue' => $weeklyRevenue,
+                    'total_orders' => $weeklyOrders->count(),
+                    'breakdown' => $weeklyBreakdown
+                ],
+                'monthly' => [
+                    'total_revenue' => $monthlyRevenue,
+                    'total_orders' => $monthlyOrders->count(),
+                    'breakdown' => $monthlyBreakdown
+                ],
+                'yearly' => $yearly, // Tahunan bisa dibiarkan angka biasa jika tidak dibuatkan tab-nya di Flutter
+                'completed_count' => $completedCount,
+                'process_count' => $processCount,
             ]
         ]);
     }
