@@ -20,9 +20,12 @@ return new class extends Migration
                 $table->decimal('weight', 8, 2);
                 $table->string('service');
                 $table->string('status')->default('Menunggu Pembayaran');
-                $table->double('courier_lat')->nullable();
-                $table->double('courier_lng')->nullable();
                 $table->text('image_path')->nullable(); // Simpan path foto timbangan
+                $table->decimal('customer_lat', 10, 8)->nullable();
+                $table->decimal('customer_lng', 10, 8)->nullable();
+                $table->decimal('courier_lat', 10, 8)->nullable();
+                $table->decimal('courier_lng', 10, 8)->nullable();
+                $table->bigInteger('total_price')->default(0);
                 $table->timestamps();
             });
         }

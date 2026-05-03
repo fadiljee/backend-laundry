@@ -9,7 +9,7 @@ class Order extends Model
 {
     use HasFactory;
 
-    protected $fillable = [
+   protected $fillable = [
         'order_code',
         'customer_name',
         'wa_number',
@@ -17,6 +17,9 @@ class Order extends Model
         'weight',
         'service',
         'status',
+        'total_price',
+        'customer_lat', // <-- Tambahkan ini
+        'customer_lng', // <-- Tambahkan ini
         'courier_lat',
         'courier_lng',
         'image_path',
