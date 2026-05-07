@@ -14,17 +14,14 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
 Route::get('/orders/{code}', [OrderController::class, 'show']); 
 
-// Pindahkan rute update lokasi kurir ke sini! 👇
 Route::put('/orders/{order_code}/update-location', [OrderController::class, 'updateCourierLocation']);
 
-// midtrans
 Route::post('/payment/token', [PaymentController::class, 'getSnapToken']);
 Route::post('/payment/callback', [PaymentController::class, 'callback']);
 Route::post('/orders', [OrderController::class, 'store']);
 
-
 // ─────────────────────────────────────────────────────────────
-// --- PROTECTED ROUTES (Hanya Admin/Kurir yang punya Token) ---
+// --- PROTECTED ROUTES ---
 // ─────────────────────────────────────────────────────────────
 Route::middleware('auth:sanctum')->group(function () {
     // Auth
@@ -40,12 +37,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/orders/{id}/location', [OrderController::class, 'updateLocation']);
     Route::post('/orders/{id}/status', [OrderController::class, 'updateStatus']); 
     Route::post('/orders/{id}/weight', [OrderController::class, 'updateWeight']);
+    Route::post('/orders/{id}/assign-courier', [OrderController::class, 'assignCourier']);
     
-    // Baris update-location yang sebelumnya di sini SUDAH DIHAPUS / DIPINDAH KE ATAS
-    
-    // Rute Manajemen Kurir
-    Route::get('/couriers', [AuthController::class, 'getCouriers']);
-    Route::put('/couriers/{id}', [AuthController::class, 'updateCourier']);
-    Route::post('/couriers', [AuthController::class, 'storeCourier']);
-    Route::delete('/couriers/{id}', [AuthController::class, 'destroyCourier']);
+    // Kurir Management
+    Route::get('/couriers', [CourierController::class, 'index']); 
+    Route::post('/couriers', [CourierController::class, 'store']); 
+    Route::put('/couriers/{id}', [CourierController::class, 'update']); 
+    Route::delete('/couriers/{id}', [CourierController::class, 'destroy']); 
 });

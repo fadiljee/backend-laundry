@@ -18,11 +18,12 @@ class Order extends Model
         'service',
         'status',
         'total_price',
-        'customer_lat', // <-- Tambahkan ini
-        'customer_lng', // <-- Tambahkan ini
+        'customer_lat', 
+        'customer_lng', 
         'courier_lat',
         'courier_lng',
         'image_path',
+        'courier_id', // <--- 🔥 TAMBAHKAN INI BOSKU 🔥
     ];
 
     // 1. Beri tahu Laravel untuk menyertakan atribut 'image_url' saat diubah ke JSON
@@ -41,5 +42,12 @@ class Order extends Model
     public function logs()
     {
         return $this->hasMany(TrackingLog::class)->orderBy('created_at', 'desc');
+    }
+
+    // Tambahkan di dalam class Order
+    public function courier()
+    {
+        // Asumsi: foreign key di tabel orders adalah 'courier_id'
+        return $this->belongsTo(User::class, 'courier_id');
     }
 }

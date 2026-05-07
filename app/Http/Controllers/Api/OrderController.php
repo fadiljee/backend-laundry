@@ -35,48 +35,80 @@ class OrderController extends Controller
     // FUNGSI HELPER: KIRIM WA FONNTE
     // =========================================================================
     private function sendWhatsApp($target, $message, $fileUrl = null)
-    {
-        // ⚠️ GANTI DENGAN TOKEN FONNTE KAMU DI SINI
-        $token = 'V98JKnEB5gMHA2AnoQ3j'; 
+{
+    // 1. BERSIHKAN NOMOR: Buang spasi, tanda +, strip, dll. Tinggalkan hanya angka.
+    $target = preg_replace('/[^0-9]/', '', $target);
 
-        $postData = [
-            'target' => $target,
-            'message' => $message,
-            'countryCode' => '62', // Agar nomor 08 otomatis jadi 628
-        ];
+    // ⚠️ Token Fonnte Kamu
+    $token = 'V98JKnEB5gMHA2AnoQ3j'; 
 
-        // Jika ada attachment gambar (seperti QR Code)
-        if ($fileUrl) {
-            $postData['url'] = $fileUrl;
-        }
+    $postData = [
+        'target' => $target,
+        'message' => $message,
+        'countryCode' => '62', // Fonnte akan otomatis mengubah 08.. jadi 628..
+    ];
 
-        $curl = curl_init();
-        curl_setopt_array($curl, array(
-            CURLOPT_URL => 'https://api.fonnte.com/send',
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_ENCODING => '',
-            CURLOPT_MAXREDIRS => 10,
-            CURLOPT_TIMEOUT => 0,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_CUSTOMREQUEST => 'POST',
-            CURLOPT_POSTFIELDS => $postData,
-            CURLOPT_HTTPHEADER => array(
-                "Authorization: $token"
-            ),
-        ));
-
-        $response = curl_exec($curl);
-        curl_close($curl);
-        return $response;
+    if ($fileUrl) {
+        $postData['url'] = $fileUrl;
     }
+
+    $curl = curl_init();
+    curl_setopt_array($curl, array(
+        CURLOPT_URL => 'https://api.fonnte.com/send',
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_ENCODING => '',
+        CURLOPT_MAXREDIRS => 10,
+        // 2. TIMEOUT DIPERSINGKAT: Maksimal 5 detik! Kalau server Fonnte lemot, tinggalkan.
+        CURLOPT_TIMEOUT => 5, 
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        CURLOPT_CUSTOMREQUEST => 'POST',
+        CURLOPT_POSTFIELDS => $postData,
+        CURLOPT_HTTPHEADER => array(
+            "Authorization: $token"
+        ),
+    ));
+
+    $response = curl_exec($curl);
+    $err = curl_error($curl);
+    curl_close($curl);
+    
+    // 3. LOGGING: Cek file storage/logs/laravel.log untuk melihat alasan error-nya
+    if ($err) {
+        \Log::error("Fonnte Error ke $target : " . $err);
+    } else {
+        \Log::info("Fonnte Respons ke $target : " . $response);
+    }
+
+    return $response;
+}
     // =========================================================================
 
     public function index()
     {
         try {
-            $orders = Order::orderBy('created_at', 'desc')->get();
-            return response()->json(['message' => 'Daftar semua pesanan', 'data' => $orders], 200);
+            // 1. Tambahkan with('courier') agar relasi kurirnya ikut ditarik dari database
+            $orders = Order::with('courier')->orderBy('created_at', 'desc')->get();
+            
+            // 2. Format datanya agar struktur JSON-nya cocok dengan Flutter
+            $formattedOrders = $orders->map(function ($order) {
+                $orderData = $order->toArray();
+                
+                // Jika kurir sudah ditugaskan, masukkan namanya ke JSON
+                if ($order->courier) {
+                    $orderData['courier_name'] = $order->courier->name;
+                    $orderData['courier_phone'] = $order->courier->phone ?? '-'; 
+                    $orderData['courier_image'] = $order->courier->photo_url; 
+                } else {
+                    $orderData['courier_name'] = null;
+                    $orderData['courier_phone'] = null;
+                    $orderData['courier_image'] = null;
+                }
+                
+                return $orderData;
+            });
+
+            return response()->json(['message' => 'Daftar semua pesanan', 'data' => $formattedOrders], 200);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Gagal mengambil data', 'error' => $e->getMessage()], 500);
         }
@@ -86,10 +118,9 @@ class OrderController extends Controller
     // use Illuminate\Support\Facades\Storage;
     // use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
-    public function store(Request $request)
+   public function store(Request $request)
     {
         try {
-            // 1. Validasi Input
             $request->validate([
                 'customer_name' => 'required',
                 'wa_number'     => 'required',
@@ -98,7 +129,6 @@ class OrderController extends Controller
                 'weight'        => 'nullable|numeric', 
             ]);
 
-            // 2. Persiapan Data
             $orderCode = 'LDR-' . strtoupper(Str::random(6));
             $layanan = $request->service;
             $berat = $request->weight ?? 0; 
@@ -106,7 +136,6 @@ class OrderController extends Controller
             $hargaSatuan = $this->daftarHarga[$layanan] ?? 0;
             $totalHarga = $hargaSatuan * $berat;
 
-            // 3. Simpan ke Database (Tabel Orders)
             $order = Order::create([
                 'order_code'    => $orderCode,
                 'customer_name' => $request->customer_name,
@@ -116,44 +145,33 @@ class OrderController extends Controller
                 'service'       => $layanan,
                 'total_price'   => $totalHarga,
                 'status'        => 'Menunggu Pembayaran',
+                'customer_lat'  => $request->lat, 
+                'customer_lng'  => $request->lng,
             ]);
 
-            // 4. Simpan Riwayat (Tabel Tracking Logs)
             TrackingLog::create([
                 'order_id' => $order->id, 
                 'status'   => 'Pesanan Dibuat',
                 'message'  => "Pesanan {$layanan} diterima. Menunggu proses timbang.",
             ]);
 
-            // ==========================================================
-            // 5. GENERATE & SIMPAN QR CODE KE FOLDER SERVER
-            // ==========================================================
            $fileName = $orderCode . '.svg';
-
-            // Kita tembak langsung pakai disk('public') biar 100% masuk ke folder yang baru dibuat
             $qrData = QrCode::size(300)->margin(1)->generate($orderCode);
             Storage::disk('public')->put('qrcodes/' . $fileName, $qrData);
-
-            // Membuat URL publik untuk gambar tersebut
             $qrUrl = asset('storage/qrcodes/' . $fileName); 
-            // ==========================================================
-            // 6. ALUR WA 1: KIRIM RESI & GAMBAR QR KE PELANGGAN
-            // ==========================================================
-            $pesanPelanggan = "Halo *{$request->customer_name}*! 👋\n\nTerima kasih telah mempercayakan cucian Anda di *Lyra Laundry*.\n\nPesanan Anda telah kami terima dengan detail:\n🧾 *Kode Nota:* {$orderCode}\n📦 *Layanan:* {$layanan}\n\nBerikut adalah QR Code resi Anda. Simpan gambar ini untuk mengecek status pesanan melalui aplikasi.\n\n*Lyra Laundry* 🚀";
             
-            // Fonnte akan mengambil gambar dari link server kamu
+            // 1. Notif Pelanggan
+            $pesanPelanggan = "Halo *{$request->customer_name}*! 👋\n\nTerima kasih telah mempercayakan cucian Anda di *Lyra Laundry*.\n\n🧾 *Kode:* {$orderCode}\n📦 *Layanan:* {$layanan}\n\nSimpan QR ini untuk cek status pesanan.";
             $this->sendWhatsApp($request->wa_number, $pesanPelanggan, $qrUrl);
 
-            // ==========================================================
-            // 7. ALUR WA 2: KIRIM NOTIF KE KURIR/ADMIN
-            // ==========================================================
-            // Mengambil nomor kurir dari .env, kalau tidak ada pakai nomor default
-            $nomorKurir = env('KURIR_PHONE', '083843607098'); 
-            $pesanKurir = "🚨 *TUGAS JEMPUT BARU* 🚨\n\nAda pelanggan baru masuk nih!\n\n👤 *Nama:* {$request->customer_name}\n📞 *WA:* {$request->wa_number}\n📍 *Alamat:* {$request->address}\n🧾 *Kode:* *{$orderCode}*\n\nSilakan cek detailnya di aplikasi Admin.";
+            // 2. Notif Semua Kurir (AMBIL DARI DATABASE)
+            $daftarKurir = \App\Models\User::where('role', 'courier')->whereNotNull('phone')->get();
+            $pesanTugas = "🚨 *TUGAS JEMPUT BARU* 🚨\n\n👤 *Nama:* {$request->customer_name}\n📍 *Alamat:* {$request->address}\n🧾 *Kode:* {$orderCode}";
             
-            $this->sendWhatsApp($nomorKurir, $pesanKurir);
+            foreach ($daftarKurir as $kurir) {
+                $this->sendWhatsApp($kurir->phone, $pesanTugas);
+            }
 
-            // 8. Berikan Response Sukses ke Flutter
             return response()->json(['message' => 'Order Created', 'data' => $order], 201);
             
         } catch (\Exception $e) {
@@ -255,10 +273,80 @@ class OrderController extends Controller
         ]);
     }
 
-    public function show($code) {
-        $order = Order::with('logs')->where('order_code', $code)->first();
-        return $order ? response()->json(['data' => $order], 200) : response()->json(['message' => 'Not Found'], 404);
+   public function show($code) {
+    // 1. Ambil order beserta relasi logs dan courier (kurir)
+    // Asumsi: di model Order.php kamu sudah ada relasi public function courier()
+    $order = Order::with(['logs', 'courier'])->where('order_code', $code)->first();
+    
+    if (!$order) {
+        return response()->json(['message' => 'Not Found'], 404);
     }
+
+    // 2. Format response agar sesuai dengan yang diminta Flutter
+    $orderData = $order->toArray();
+    
+    // 3. Sisipkan data kurir ke dalam response JSON
+    if ($order->courier) {
+        $orderData['courier_name'] = $order->courier->name;
+        
+        // Cek apakah tabel users punya kolom phone/no_hp. Jika tidak ada, kita kosongkan dulu.
+        $orderData['courier_phone'] = $order->courier->phone ?? '-'; 
+        
+        // Menggunakan getPhotoUrlAttribute() yang sudah kamu buat di model User
+        $orderData['courier_image'] = $order->courier->photo_url; 
+    } else {
+        // Jika belum ada kurir yang di-assign
+        $orderData['courier_name'] = null;
+        $orderData['courier_phone'] = null;
+        $orderData['courier_image'] = null;
+    }
+
+    return response()->json(['data' => $orderData], 200);
+}
+
+        public function assignCourier(Request $request, $id)
+        {
+            // 1. Validasi input: pastikan courier_id dikirim dan ada di tabel users
+            $request->validate([
+                'courier_id' => 'required|exists:users,id'
+            ]);
+
+            // 2. Cari data pesanan berdasarkan ID
+            $order = Order::findOrFail($id);
+            
+            // 3. Update courier_id di database
+            $order->courier_id = $request->courier_id;
+            $order->save();
+
+            // 4. Catat ke riwayat pelacakan
+            TrackingLog::create([
+                'order_id' => $order->id,
+                'status'   => 'Kurir Ditugaskan',
+                'message'  => 'Kurir telah ditugaskan dan akan segera memproses pesanan Anda.',
+            ]);
+
+            // 5. Ambil data kurir untuk mendapatkan nomor teleponnya
+            $courier = \App\Models\User::find($request->courier_id);
+            
+            // 6. Cek apakah kurir ditemukan dan memiliki nomor telepon (kolom 'phone')
+            if ($courier && !empty($courier->phone)) { 
+                $pesanKurir = "🚨 *TUGAS BARU* 🚨\n\n" .
+                            "Halo *{$courier->name}*, kamu ditugaskan untuk pesanan:\n" .
+                            "📦 Kode: *{$order->order_code}*\n" .
+                            "📍 Alamat: {$order->address}\n" .
+                            "👤 Pelanggan: {$order->customer_name}\n\n" .
+                            "Silakan cek aplikasi untuk detailnya. Semangat! 🚀";
+
+                // Kirim pesan ke nomor kurir yang ada di database
+                $this->sendWhatsApp($courier->phone, $pesanKurir);
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Kurir berhasil ditugaskan dan notifikasi dikirim',
+                'data' => $order
+            ], 200);
+        }
 
     public function updateCourierLocation(Request $request, $order_code) {
         $order = Order::where('order_code', $order_code)->first();
